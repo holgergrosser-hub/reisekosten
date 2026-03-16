@@ -26,7 +26,7 @@ exports.handler = async function(event) {
       const params = { ...event.queryStringParameters }
       delete params.gasUrl
       const qs = new URLSearchParams(params).toString()
-      if (qs) targetUrl += '?' + qs
+      if (qs) targetUrl += (targetUrl.includes('?') ? '&' : '?') + qs
       fetchOptions.method = 'GET'
 
     } else if (event.httpMethod === 'POST') {
@@ -42,7 +42,30 @@ exports.handler = async function(event) {
     const res = await fetch(targetUrl, fetchOptions)
     const text = await res.text()
 
-    return { statusCode: 200, headers, body: text }
+    // Frontend erwartet JSON. Google liefert bei falscher/privater Web-App URL oft HTML (Login/Error Page).
+    // Damit die App nicht an JSON.parse scheitert, kapseln wir non-JSON als standardisierte Fehlermeldung.
+    const contentType = res.headers.get('content-type') || ''
+    const looksLikeJson = (() => {
+      const t = (text || '').trim()
+      return t.startsWith('{') || t.startsWith('[')
+    })()
+
+    if (!looksLikeJson) {
+      const preview = (text || '').replace(/\s+/g, ' ').substring(0, 240)
+      return {
+        statusCode: 200,
+        headers,
+        body: JSON.stringify({
+          status: 'error',
+          message: 'GAS hat keine JSON-Antwort geliefert. Prüfe Web-App URL (/exec) und Zugriff ("Jeder").',
+          upstreamStatus: res.status,
+          upstreamContentType: contentType,
+          preview
+        })
+      }
+    }
+
+    return { statusCode: res.status || 200, headers, body: text }
 
   } catch (err) {
     return {

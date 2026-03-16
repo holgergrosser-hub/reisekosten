@@ -48,3 +48,17 @@ npm run dev
 - React 18 + Vite
 - SheetJS (xlsx) für Excel-Verarbeitung
 - Kein Backend nötig – alles im Browser
+
+## Google Apps Script
+
+Die App erwartet eine Google Apps Script Web-App, die JSON zurückliefert.
+Das passende Script liegt im Repo unter `GoogleAppsScript.js` (im Projekt-Root) und muss in Apps Script eingefügt und als Web-App (`/exec`) bereitgestellt werden.
+
+Die Lösung arbeitet mit **zwei** Google Sheets:
+- `SOURCE_SPREADSHEET_ID`: Zeiterfassung (lesen)
+- `MASTER_SPREADSHEET_ID`: Master Reisekosten (schreiben/leeren)
+
+Empfohlen: IDs als Script Properties setzen:
+- `SOURCE_SPREADSHEET_ID`
+- `MASTER_SPREADSHEET_ID`
+- `MASTER_SHEET_GID` (optional, Tab-GID im Master, wenn ein bestehender Tab genutzt werden soll)
