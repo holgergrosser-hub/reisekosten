@@ -161,7 +161,8 @@ function getReisezeiten_(e) {
     var plz = addr && addr.plz ? String(addr.plz).trim() : '';
     var ort = addr && addr.ort ? String(addr.ort).trim() : '';
     var strasse = addr && addr.strasse ? String(addr.strasse).trim() : '';
-    var reisezielAuto = (plz || ort) ? String((plz ? plz + ' ' : '') + (ort || '')).trim() : '';
+    var ortTeil = (plz || ort) ? String((plz ? plz + ' ' : '') + (ort || '')).trim() : '';
+    var reisezielAuto = String([ortTeil, strasse].filter(function(x){ return x && String(x).trim(); }).join(', ')).trim();
 
     rows.push({
       mitarbeiter: mitarbeiter,
@@ -183,7 +184,7 @@ function getReisezeiten_(e) {
       bargeld: '',
       verpflegung: '',
       eigPsch: '',
-      bemerkung: strasse,
+      bemerkung: '',
       weitereInfo: reiseInfo || ''
     });
   }
