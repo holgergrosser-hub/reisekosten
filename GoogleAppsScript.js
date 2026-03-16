@@ -30,6 +30,17 @@ var MASTER_SPREADSHEET_ID = '1fmNJwJYuq2tzFVskhr7xPUjnW4lwNy3f_ex0LKd730s';
 // Optional: Wenn du in einen existierenden Tab im Master schreiben willst (gid aus der URL)
 var MASTER_SHEET_GID = '';
 
+// Optional: Firmen-/Adress-Lookup (separates Spreadsheet)
+// In der Datei:
+// - Spalte A (1): Firmenname
+// - Spalte BS (71): Straße
+// - Spalte BW (75): Ort
+// - Spalte CA (79): PLZ
+// Empfehlung: als Script Property setzen: FIRMA_LOOKUP_SPREADSHEET_ID
+var FIRMA_LOOKUP_SPREADSHEET_ID = '1FWbeX3YeK9Uidyn9obKJ7z-J-zXX1h5PsXcfk_YHAyU';
+
+var __firmaLookupCache = null;
+
 function doGet(e) {
   return route_(e);
 }
@@ -100,6 +111,8 @@ function getReisezeiten_(e) {
   var sheet = ss.getSheetByName('Formularantworten 1');
   if (!sheet) throw new Error('Sheet "Formularantworten 1" nicht gefunden');
 
+  var firmaLookup = getFirmaLookup_();
+
   var values = sheet.getDataRange().getValues();
   if (!values || values.length < 2) {
     return { status: 'ok', total: 0, mitarbeiterList: [], rows: [] };
@@ -143,10 +156,17 @@ function getReisezeiten_(e) {
 
     mitarbeiterSet[mitarbeiter] = true;
 
+    var kunde = kundeAnlass.kunde;
+    var addr = kunde ? firmaLookup[normalizeFirma_(kunde)] : null;
+    var plz = addr && addr.plz ? String(addr.plz).trim() : '';
+    var ort = addr && addr.ort ? String(addr.ort).trim() : '';
+    var strasse = addr && addr.strasse ? String(addr.strasse).trim() : '';
+    var reisezielAuto = (plz || ort) ? String((plz ? plz + ' ' : '') + (ort || '')).trim() : '';
+
     rows.push({
       mitarbeiter: mitarbeiter,
-      reiseziel: '',
-      kunde: kundeAnlass.kunde,
+      reiseziel: reisezielAuto,
+      kunde: kunde,
       anlass: kundeAnlass.anlass,
       datumVon: datumVonIso,
       datumBis: datumBisIso,
@@ -163,7 +183,7 @@ function getReisezeiten_(e) {
       bargeld: '',
       verpflegung: '',
       eigPsch: '',
-      bemerkung: '',
+      bemerkung: strasse,
       weitereInfo: reiseInfo || ''
     });
   }
@@ -176,6 +196,77 @@ function getReisezeiten_(e) {
     mitarbeiterList: mitarbeiterList,
     rows: rows
   };
+}
+
+function getFirmaLookup_() {
+  if (__firmaLookupCache) return __firmaLookupCache;
+
+  var id = getPropOrConst_('FIRMA_LOOKUP_SPREADSHEET_ID', FIRMA_LOOKUP_SPREADSHEET_ID);
+  if (!id) {
+    __firmaLookupCache = {};
+    return __firmaLookupCache;
+  }
+
+  var ss;
+  try {
+    ss = SpreadsheetApp.openById(id);
+  } catch (e) {
+    // Nicht hart failen – dann läuft die App weiterhin, nur ohne Auto-Felder.
+    __firmaLookupCache = {};
+    return __firmaLookupCache;
+  }
+
+  var sheet = ss.getSheets()[0];
+  if (!sheet) {
+    __firmaLookupCache = {};
+    return __firmaLookupCache;
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (!lastRow || lastRow < 2) {
+    __firmaLookupCache = {};
+    return __firmaLookupCache;
+  }
+
+  // Read only needed columns: A, BS(71), BW(75), CA(79)
+  var firmaCol = sheet.getRange(1, 1, lastRow, 1).getValues();
+  var strasseCol = sheet.getRange(1, 71, lastRow, 1).getValues();
+  var ortCol = sheet.getRange(1, 75, lastRow, 1).getValues();
+  var plzCol = sheet.getRange(1, 79, lastRow, 1).getValues();
+
+  var map = {};
+  for (var r = 0; r < lastRow; r++) {
+    var firmaRaw = firmaCol[r][0];
+    if (!firmaRaw) continue;
+    var firma = String(firmaRaw).trim();
+    if (!firma) continue;
+
+    // Header-Zeile heuristisch überspringen
+    if (r === 0 && /^firma(name)?$/i.test(firma)) continue;
+
+    var key = normalizeFirma_(firma);
+    if (!key) continue;
+
+    // Erste gefundene Adresse gewinnt (kein Override)
+    if (!map[key]) {
+      map[key] = {
+        strasse: strasseCol[r][0] || '',
+        ort: ortCol[r][0] || '',
+        plz: plzCol[r][0] || ''
+      };
+    }
+  }
+
+  __firmaLookupCache = map;
+  return __firmaLookupCache;
+}
+
+function normalizeFirma_(name) {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .replace(/\u00a0/g, ' ');
 }
 
 function writeReisekosten_(rows) {
