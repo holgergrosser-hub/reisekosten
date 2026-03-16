@@ -40,6 +40,7 @@ var MASTER_SHEET_GID = '';
 var FIRMA_LOOKUP_SPREADSHEET_ID = '1FWbeX3YeK9Uidyn9obKJ7z-J-zXX1h5PsXcfk_YHAyU';
 
 var __firmaLookupCache = null;
+var __firmaLookupCacheKey = 'firmaLookup_v1';
 
 function doGet(e) {
   return route_(e);
@@ -202,6 +203,17 @@ function getReisezeiten_(e) {
 function getFirmaLookup_() {
   if (__firmaLookupCache) return __firmaLookupCache;
 
+  // Try Script Cache first (fast, survives across executions)
+  try {
+    var cached = CacheService.getScriptCache().get(__firmaLookupCacheKey);
+    if (cached) {
+      __firmaLookupCache = JSON.parse(cached) || {};
+      return __firmaLookupCache;
+    }
+  } catch (_) {
+    // ignore cache errors
+  }
+
   var id = getPropOrConst_('FIRMA_LOOKUP_SPREADSHEET_ID', FIRMA_LOOKUP_SPREADSHEET_ID);
   if (!id) {
     __firmaLookupCache = {};
@@ -229,15 +241,13 @@ function getFirmaLookup_() {
     return __firmaLookupCache;
   }
 
-  // Read only needed columns: A, BS(71), BW(75), CA(79)
-  var firmaCol = sheet.getRange(1, 1, lastRow, 1).getValues();
-  var strasseCol = sheet.getRange(1, 71, lastRow, 1).getValues();
-  var ortCol = sheet.getRange(1, 75, lastRow, 1).getValues();
-  var plzCol = sheet.getRange(1, 79, lastRow, 1).getValues();
+  // Single read: A..CA (79 columns). Much faster than multiple range calls.
+  var data = sheet.getRange(1, 1, lastRow, 79).getValues();
 
   var map = {};
-  for (var r = 0; r < lastRow; r++) {
-    var firmaRaw = firmaCol[r][0];
+  for (var r = 0; r < data.length; r++) {
+    var row = data[r];
+    var firmaRaw = row[0];
     if (!firmaRaw) continue;
     var firma = String(firmaRaw).trim();
     if (!firma) continue;
@@ -251,14 +261,22 @@ function getFirmaLookup_() {
     // Erste gefundene Adresse gewinnt (kein Override)
     if (!map[key]) {
       map[key] = {
-        strasse: strasseCol[r][0] || '',
-        ort: ortCol[r][0] || '',
-        plz: plzCol[r][0] || ''
+        // BS=71 -> index 70, BW=75 -> index 74, CA=79 -> index 78
+        strasse: row[70] || '',
+        ort: row[74] || '',
+        plz: row[78] || ''
       };
     }
   }
 
   __firmaLookupCache = map;
+
+  // Store in cache for 6 hours
+  try {
+    CacheService.getScriptCache().put(__firmaLookupCacheKey, JSON.stringify(map), 21600);
+  } catch (_) {
+    // ignore cache errors
+  }
   return __firmaLookupCache;
 }
 
