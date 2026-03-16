@@ -33,10 +33,10 @@ async function clearMasterSheet(gasUrl) {
 function exportToExcel(rows) {
   const headers = ['Mitarbeiter','Reiseziel','Kunde','Anlaß','Datum Von','Datum bis',
     'Uhr von','Uhr bis','Std.','DIBA-Belege','Privat km','Privat PKW',
-    'Hotel','Bewirtung','Bargeld','Verpflegung','Eig Psch']
+    'Hotel','Bewirtung','Bargeld','Verpflegung','Eig Psch','Bemerkung']
   const data = rows.map(r => [r.mitarbeiter,r.reiseziel,r.kunde,r.anlass,r.datumVon,
     r.datumBis,r.uhrVon,r.uhrBis,r.std,r.dibaBeleg,r.privatKm,r.privatPkw,
-    r.hotelKosten,r.bewirtung,r.bargeld,r.verpflegung,r.eigPsch])
+    r.hotelKosten,r.bewirtung,r.bargeld,r.verpflegung,r.eigPsch,r.bemerkung])
   const ws = XLSX.utils.aoa_to_sheet([headers, ...data])
   ws['!cols'] = headers.map((_, i) => ({ wch: i < 4 ? 28 : 12 }))
   const wb = XLSX.utils.book_new()
@@ -317,6 +317,7 @@ export default function App() {
                   <th style={{ background:'#1e40af' }}>Bewirtung €</th>
                   <th style={{ background:'#1e40af' }}>Bargeld €</th>
                   <th style={{ background:'#1e40af' }}>Verpfl. €</th>
+                  <th style={{ background:'#1e40af' }}>Bemerkung</th>
                   <th>Info</th>
                 </tr>
               </thead>
@@ -347,6 +348,7 @@ export default function App() {
                     <td style={{ minWidth:76 }}><EditCell value={r.bewirtung}   onChange={v => updateRow(r.id,'bewirtung',v)}   placeholder="€" /></td>
                     <td style={{ minWidth:76 }}><EditCell value={r.bargeld}     onChange={v => updateRow(r.id,'bargeld',v)}     placeholder="€" /></td>
                     <td style={{ minWidth:76 }}><EditCell value={r.verpflegung} onChange={v => updateRow(r.id,'verpflegung',v)} placeholder="€" /></td>
+                    <td style={{ minWidth:120 }}><EditCell value={r.bemerkung} onChange={v => updateRow(r.id,'bemerkung',v)} placeholder="Bemerkung..." /></td>
                     <td style={{ fontSize:11, color:'#94a3b8', maxWidth:150 }}>
                       {r.weitereInfo && <span title={r.weitereInfo}>💬 {r.weitereInfo.substring(0,32)}{r.weitereInfo.length>32?'…':''}</span>}
                     </td>
