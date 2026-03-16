@@ -166,6 +166,48 @@ export default function App() {
   const [selectedRows, setSelected]  = useState(new Set())
   const [filters, setFilters]        = useState({ mitarbeiter:'', vonDatum:'', bisDatum:'', kunde:'' })
 
+  const toIso_ = (d) => {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
+
+  const startOfMonth_ = (d) => new Date(d.getFullYear(), d.getMonth(), 1)
+
+  const addMonths_ = (d, delta) => {
+    // Keep it safe across month-length differences by snapping to day 1.
+    return new Date(d.getFullYear(), d.getMonth() + delta, 1)
+  }
+
+  const applyQuickRange_ = (key) => {
+    const now = new Date()
+    let vonDatum = filters.vonDatum
+    let bisDatum = filters.bisDatum
+
+    if (key === 'gesamt') {
+      vonDatum = ''
+      bisDatum = ''
+    } else if (key === 'letzterMonat') {
+      const startPrev = addMonths_(startOfMonth_(now), -1)
+      const endPrev = new Date(startOfMonth_(now).getTime() - 24 * 60 * 60 * 1000)
+      vonDatum = toIso_(startPrev)
+      bisDatum = toIso_(endPrev)
+    } else if (key === 'letzte3') {
+      const start = addMonths_(startOfMonth_(now), -2)
+      vonDatum = toIso_(start)
+      bisDatum = toIso_(now)
+    } else if (key === 'letzte6') {
+      const start = addMonths_(startOfMonth_(now), -5)
+      vonDatum = toIso_(start)
+      bisDatum = toIso_(now)
+    }
+
+    const next = { ...filters, vonDatum, bisDatum }
+    setFilters(next)
+    if (gasUrl) loadData(gasUrl, next)
+  }
+
   const loadData = useCallback(async (url, params = {}) => {
     setLoading(true); setError(''); setPushResult(null)
     try {
@@ -292,11 +334,31 @@ export default function App() {
         <span style={{ color:'#94a3b8', fontSize:12 }}>–</span>
         <input type="date" value={filters.bisDatum} onChange={e => setFilters(f => ({...f, bisDatum:e.target.value}))}
           style={{ padding:'5px 10px', borderRadius:6, border:'1px solid #e2e8f0', fontSize:13 }} />
+
+        <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+          <button onClick={() => applyQuickRange_('letzterMonat')}
+            style={{ padding:'5px 10px', borderRadius:6, background:'#f1f5f9', color:'#475569', fontSize:13, border:'none', cursor:'pointer' }}>
+            letzten Monat
+          </button>
+          <button onClick={() => applyQuickRange_('letzte3')}
+            style={{ padding:'5px 10px', borderRadius:6, background:'#f1f5f9', color:'#475569', fontSize:13, border:'none', cursor:'pointer' }}>
+            letzte 3 Monate
+          </button>
+          <button onClick={() => applyQuickRange_('letzte6')}
+            style={{ padding:'5px 10px', borderRadius:6, background:'#f1f5f9', color:'#475569', fontSize:13, border:'none', cursor:'pointer' }}>
+            letzte 6 Monate
+          </button>
+          <button onClick={() => applyQuickRange_('gesamt')}
+            style={{ padding:'5px 10px', borderRadius:6, background:'#f1f5f9', color:'#475569', fontSize:13, border:'none', cursor:'pointer' }}>
+            gesamt
+          </button>
+        </div>
+
         <input type="text" value={filters.kunde} onChange={e => setFilters(f => ({...f, kunde:e.target.value}))}
           placeholder="Kunde..." style={{ padding:'5px 10px', borderRadius:6, border:'1px solid #e2e8f0', fontSize:13, minWidth:150 }} />
         <button onClick={() => setFilters({ mitarbeiter:'', vonDatum:'', bisDatum:'', kunde:'' })}
           style={{ padding:'5px 12px', borderRadius:6, background:'#f1f5f9', color:'#475569', fontSize:13, border:'none', cursor:'pointer' }}>✕</button>
-        <button onClick={() => loadData(gasUrl)} disabled={loading}
+        <button onClick={() => loadData(gasUrl, filters)} disabled={loading}
           style={{ padding:'5px 12px', borderRadius:6, background:'#eff6ff', color:'#1d4ed8', fontSize:13, border:'none', cursor:'pointer' }}>
           {loading ? <Spinner /> : '🔄 Neu laden'}
         </button>
