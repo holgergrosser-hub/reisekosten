@@ -40,7 +40,7 @@ var MASTER_SHEET_GID = '';
 var FIRMA_LOOKUP_SPREADSHEET_ID = '1FWbeX3YeK9Uidyn9obKJ7z-J-zXX1h5PsXcfk_YHAyU';
 
 var __firmaLookupCache = null;
-var __firmaLookupCacheKey = 'firmaLookup_v1';
+var __firmaCachePrefix = 'firmaAddr_v1:';
 
 function doGet(e) {
   return route_(e);
@@ -112,8 +112,6 @@ function getReisezeiten_(e) {
   var sheet = ss.getSheetByName('Formularantworten 1');
   if (!sheet) throw new Error('Sheet "Formularantworten 1" nicht gefunden');
 
-  var firmaLookup = getFirmaLookup_();
-
   var values = sheet.getDataRange().getValues();
   if (!values || values.length < 2) {
     return { status: 'ok', total: 0, mitarbeiterList: [], rows: [] };
@@ -128,6 +126,8 @@ function getReisezeiten_(e) {
 
   var rows = [];
   var mitarbeiterSet = {};
+  var preRows = [];
+  var neededFirmaKeys = {};
 
   for (var r = 1; r < values.length; r++) {
     var row = values[r];
@@ -158,7 +158,31 @@ function getReisezeiten_(e) {
     mitarbeiterSet[mitarbeiter] = true;
 
     var kunde = kundeAnlass.kunde;
-    var addr = kunde ? firmaLookup[normalizeFirma_(kunde)] : null;
+    var kundeKey = kunde ? normalizeFirma_(kunde) : '';
+    if (kundeKey) neededFirmaKeys[kundeKey] = true;
+
+    preRows.push({
+      mitarbeiter: mitarbeiter,
+      kunde: kunde,
+      kundeKey: kundeKey,
+      anlass: kundeAnlass.anlass,
+      datumVon: datumVonIso,
+      datumBis: datumBisIso,
+      uhrVon: startUm,
+      uhrBis: endeUm,
+      std: calcHours_(startUm, endeUm),
+      privatKm: privatKm,
+      hotel: hotel,
+      weitereInfo: reiseInfo || ''
+    });
+  }
+
+  // Firmen-/Adressdaten nur für tatsächlich vorkommende Kunden hydratisieren
+  var firmaMap = getFirmaLookupForKeys_(Object.keys(neededFirmaKeys));
+
+  for (var i = 0; i < preRows.length; i++) {
+    var pr = preRows[i];
+    var addr = pr.kundeKey ? (firmaMap[pr.kundeKey] || null) : null;
     var plz = addr && addr.plz ? String(addr.plz).trim() : '';
     var ort = addr && addr.ort ? String(addr.ort).trim() : '';
     var strasse = addr && addr.strasse ? String(addr.strasse).trim() : '';
@@ -166,19 +190,19 @@ function getReisezeiten_(e) {
     var reisezielAuto = String([ortTeil, strasse].filter(function(x){ return x && String(x).trim(); }).join(', ')).trim();
 
     rows.push({
-      mitarbeiter: mitarbeiter,
+      mitarbeiter: pr.mitarbeiter,
       reiseziel: reisezielAuto,
-      kunde: kunde,
-      anlass: kundeAnlass.anlass,
-      datumVon: datumVonIso,
-      datumBis: datumBisIso,
-      uhrVon: startUm,
-      uhrBis: endeUm,
-      std: calcHours_(startUm, endeUm),
-      transport: privatKm ? 'Auto Privat' : '',
-      privatKm: privatKm,
+      kunde: pr.kunde,
+      anlass: pr.anlass,
+      datumVon: pr.datumVon,
+      datumBis: pr.datumBis,
+      uhrVon: pr.uhrVon,
+      uhrBis: pr.uhrBis,
+      std: pr.std,
+      transport: pr.privatKm ? 'Auto Privat' : '',
+      privatKm: pr.privatKm,
       privatPkw: '',
-      hotel: hotel,
+      hotel: pr.hotel,
       hotelKosten: '',
       dibaBeleg: '',
       bewirtung: '',
@@ -186,7 +210,7 @@ function getReisezeiten_(e) {
       verpflegung: '',
       eigPsch: '',
       bemerkung: '',
-      weitereInfo: reiseInfo || ''
+      weitereInfo: pr.weitereInfo
     });
   }
 
@@ -200,84 +224,107 @@ function getReisezeiten_(e) {
   };
 }
 
-function getFirmaLookup_() {
-  if (__firmaLookupCache) return __firmaLookupCache;
+function getFirmaLookupForKeys_(firmaKeys) {
+  if (!firmaKeys || !firmaKeys.length) return {};
 
-  // Try Script Cache first (fast, survives across executions)
+  // In-Memory Cache pro Execution
+  if (!__firmaLookupCache) __firmaLookupCache = {};
+
+  var cache = CacheService.getScriptCache();
+  var cacheKeys = firmaKeys.map(function(k){ return __firmaCachePrefix + k; });
+
+  // Read from cache (batch)
+  var cached = {};
   try {
-    var cached = CacheService.getScriptCache().get(__firmaLookupCacheKey);
-    if (cached) {
-      __firmaLookupCache = JSON.parse(cached) || {};
-      return __firmaLookupCache;
-    }
+    cached = cache.getAll(cacheKeys) || {};
   } catch (_) {
-    // ignore cache errors
+    cached = {};
   }
+
+  var result = {};
+  var missing = {};
+  for (var i = 0; i < firmaKeys.length; i++) {
+    var k = firmaKeys[i];
+    if (__firmaLookupCache[k]) {
+      result[k] = __firmaLookupCache[k];
+      continue;
+    }
+    var ck = __firmaCachePrefix + k;
+    if (cached[ck]) {
+      try {
+        var parsed = JSON.parse(cached[ck]);
+        if (parsed) {
+          __firmaLookupCache[k] = parsed;
+          result[k] = parsed;
+          continue;
+        }
+      } catch (_) {}
+    }
+    missing[k] = true;
+  }
+
+  // Nothing missing → done
+  var missingKeys = Object.keys(missing);
+  if (!missingKeys.length) return result;
 
   var id = getPropOrConst_('FIRMA_LOOKUP_SPREADSHEET_ID', FIRMA_LOOKUP_SPREADSHEET_ID);
-  if (!id) {
-    __firmaLookupCache = {};
-    return __firmaLookupCache;
-  }
+  if (!id) return result;
 
   var ss;
   try {
     ss = SpreadsheetApp.openById(id);
-  } catch (e) {
-    // Nicht hart failen – dann läuft die App weiterhin, nur ohne Auto-Felder.
-    __firmaLookupCache = {};
-    return __firmaLookupCache;
+  } catch (_) {
+    return result;
   }
 
   var sheet = ss.getSheets()[0];
-  if (!sheet) {
-    __firmaLookupCache = {};
-    return __firmaLookupCache;
-  }
+  if (!sheet) return result;
 
   var lastRow = sheet.getLastRow();
-  if (!lastRow || lastRow < 2) {
-    __firmaLookupCache = {};
-    return __firmaLookupCache;
-  }
+  if (!lastRow || lastRow < 2) return result;
 
-  // Single read: A..CA (79 columns). Much faster than multiple range calls.
-  var data = sheet.getRange(1, 1, lastRow, 79).getValues();
+  // Read only needed columns to minimize transferred cells
+  var firmaCol = sheet.getRange(1, 1, lastRow, 1).getValues();
+  var strasseCol = sheet.getRange(1, 71, lastRow, 1).getValues();
+  var ortCol = sheet.getRange(1, 75, lastRow, 1).getValues();
+  var plzCol = sheet.getRange(1, 79, lastRow, 1).getValues();
 
-  var map = {};
-  for (var r = 0; r < data.length; r++) {
-    var row = data[r];
-    var firmaRaw = row[0];
+  var toCache = {};
+  for (var r = 0; r < lastRow; r++) {
+    var firmaRaw = firmaCol[r][0];
     if (!firmaRaw) continue;
     var firma = String(firmaRaw).trim();
     if (!firma) continue;
-
-    // Header-Zeile heuristisch überspringen
     if (r === 0 && /^firma(name)?$/i.test(firma)) continue;
 
     var key = normalizeFirma_(firma);
-    if (!key) continue;
+    if (!key || !missing[key]) continue;
 
-    // Erste gefundene Adresse gewinnt (kein Override)
-    if (!map[key]) {
-      map[key] = {
-        // BS=71 -> index 70, BW=75 -> index 74, CA=79 -> index 78
-        strasse: row[70] || '',
-        ort: row[74] || '',
-        plz: row[78] || ''
-      };
-    }
+    var addr = {
+      strasse: strasseCol[r][0] || '',
+      ort: ortCol[r][0] || '',
+      plz: plzCol[r][0] || ''
+    };
+
+    __firmaLookupCache[key] = addr;
+    result[key] = addr;
+    delete missing[key];
+
+    // Prepare cache put
+    toCache[__firmaCachePrefix + key] = JSON.stringify(addr);
+
+    // Early stop if all resolved
+    if (Object.keys(missing).length === 0) break;
   }
 
-  __firmaLookupCache = map;
-
-  // Store in cache for 6 hours
+  // Cache resolved entries for 6 hours
   try {
-    CacheService.getScriptCache().put(__firmaLookupCacheKey, JSON.stringify(map), 21600);
+    if (Object.keys(toCache).length) cache.putAll(toCache, 21600);
   } catch (_) {
     // ignore cache errors
   }
-  return __firmaLookupCache;
+
+  return result;
 }
 
 function normalizeFirma_(name) {

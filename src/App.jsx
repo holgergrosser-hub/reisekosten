@@ -4,6 +4,20 @@ import * as XLSX from 'xlsx'
 // Alle Requests laufen über Netlify Proxy → kein CORS Problem
 const PROXY = '/.netlify/functions/proxy'
 
+async function pingGas(gasUrl) {
+  const url = new URL(PROXY, window.location.origin)
+  url.searchParams.set('gasUrl', gasUrl)
+  // Absichtlich KEIN action-Parameter → GAS liefert "Reisekosten API bereit" als lightweight Ping.
+  const res = await fetch(url.toString())
+  const text = await res.text()
+  try { return JSON.parse(text) }
+  catch {
+    const ct = res.headers.get('content-type') || ''
+    const preview = (text || '').substring(0, 200)
+    throw new Error(`Ungültige Antwort (ping) [${res.status}] ${ct}: ` + preview)
+  }
+}
+
 async function fetchReisezeiten(gasUrl, params = {}) {
   const url = new URL(PROXY, window.location.origin)
   url.searchParams.set('gasUrl', gasUrl)
@@ -14,7 +28,15 @@ async function fetchReisezeiten(gasUrl, params = {}) {
   const res = await fetch(url.toString())
   const text = await res.text()
   try { return JSON.parse(text) }
-  catch { throw new Error('Ungültige Antwort: ' + text.substring(0, 200)) }
+  catch {
+    const ct = res.headers.get('content-type') || ''
+    const preview = (text || '').substring(0, 200)
+    // Häufiger Fall lokal: Vite liefert index.html für /.netlify/functions/*
+    if ((text || '').trim().startsWith('<!DOCTYPE html')) {
+      throw new Error(`Ungültige Antwort [${res.status}] (HTML). Hinweis: Wenn du lokal startest, nutze \'netlify dev\' statt \'npm run dev\'. Preview: ` + preview)
+    }
+    throw new Error(`Ungültige Antwort [${res.status}] ${ct}: ` + preview)
+  }
 }
 
 async function pushToSheets(gasUrl, rows) {
@@ -81,9 +103,9 @@ function SetupScreen({ onConnect }) {
     if (!url.trim()) return
     setTesting(true); setTestResult(null)
     try {
-      const res = await fetchReisezeiten(url.trim())
+      const res = await pingGas(url.trim())
       if (res.status === 'ok') {
-        setTestResult({ ok: true, msg: `✅ Verbunden! ${res.total} Reisezeiten · ${res.mitarbeiterList?.length||0} Mitarbeiter` })
+        setTestResult({ ok: true, msg: `✅ Verbunden! (${res.message || 'OK'})` })
         localStorage.setItem('gasUrl', url.trim())
       } else {
         setTestResult({ ok: false, msg: '❌ ' + res.message })
