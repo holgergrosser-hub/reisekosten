@@ -1,31 +1,38 @@
 import React, { useState, useCallback, useMemo } from 'react'
 import * as XLSX from 'xlsx'
 
+// Alle Requests laufen über Netlify Proxy → kein CORS Problem
+const PROXY = '/.netlify/functions/proxy'
+
 async function fetchReisezeiten(gasUrl, params = {}) {
-  const url = new URL(gasUrl)
+  const url = new URL(PROXY, window.location.origin)
+  url.searchParams.set('gasUrl', gasUrl)
   url.searchParams.set('action', 'getReisezeiten')
   if (params.mitarbeiter) url.searchParams.set('mitarbeiter', params.mitarbeiter)
   if (params.vonDatum)    url.searchParams.set('vonDatum', params.vonDatum)
   if (params.bisDatum)    url.searchParams.set('bisDatum', params.bisDatum)
-  const res = await fetch(url.toString(), { redirect: 'follow' })
+  const res = await fetch(url.toString())
   const text = await res.text()
   try { return JSON.parse(text) }
   catch { throw new Error('Ungültige Antwort: ' + text.substring(0, 200)) }
 }
 
 async function pushToSheets(gasUrl, rows) {
-  const formData = new FormData()
-  formData.append('action', 'writeReisekosten')
-  formData.append('data', JSON.stringify(rows))
-  const res = await fetch(gasUrl, { method: 'POST', body: formData, redirect: 'follow' })
+  const res = await fetch(PROXY + '?gasUrl=' + encodeURIComponent(gasUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'writeReisekosten', data: rows })
+  })
   const text = await res.text()
   try { return JSON.parse(text) } catch { return { status: 'ok', message: text } }
 }
 
 async function clearMasterSheet(gasUrl) {
-  const formData = new FormData()
-  formData.append('action', 'clearMaster')
-  const res = await fetch(gasUrl, { method: 'POST', body: formData, redirect: 'follow' })
+  const res = await fetch(PROXY + '?gasUrl=' + encodeURIComponent(gasUrl), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'clearMaster' })
+  })
   const text = await res.text()
   try { return JSON.parse(text) } catch { return { status: 'ok' } }
 }
